@@ -1,0 +1,121 @@
+// ==UserScript==
+// @name         Ozon Relocate Automation (by desslow)
+// @namespace    http://tampermonkey.net/
+// @version      4.0
+// @description  Автоматизация смены ячейки через прямое сканирование в поле ввода
+// @author       desslow
+// @match        https://*.ozon.ru/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    const TRIGGER_CODE = '8888'; // Код QR-триггера для запуска процесса
+
+    let isWaitingForCell = false;
+    let inputBuffer = '';
+    let lastKeyTime = Date.now();
+
+    console.log(`[Relocator] Скрипт запущен в нативном режиме. Ожидание триггера "${TRIGGER_CODE}"...`);
+
+    // Вспомогательная функция ожидания элементов
+    function waitForElement(selector, timeout = 3000) {
+        return new Promise((resolve, reject) => {
+            const startTime = Date.now();
+            const interval = setInterval(() => {
+                const el = document.querySelector(selector);
+                if (el) {
+                    clearInterval(interval);
+                    resolve(el);
+                } else if (Date.now() - startTime > timeout) {
+                    clearInterval(interval);
+                    reject(new Error(`Элемент ${selector} не найден.`));
+                }
+            }, 100);
+        });
+    }
+
+    // Слушатель клавиатуры
+    window.addEventListener('keydown', function(e) {
+        const currentTime = Date.now();
+        if (currentTime - lastKeyTime > 150) {
+            inputBuffer = '';
+        }
+        lastKeyTime = currentTime;
+
+        if (e.key === 'Enter') {
+            const rawCode = inputBuffer.trim();
+            inputBuffer = '';
+
+            // Если считан триггер запуска
+            if (rawCode === TRIGGER_CODE && !isWaitingForCell) {
+                e.preventDefault();
+                e.stopPropagation();
+                startRelocationProcess();
+                return;
+            }
+
+            // Если мы ждали скан ячейки, и сканер прислал финальный Enter
+            if (isWaitingForCell) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                console.log("[Relocator] Скан ячейки завершен. Сохраняем через 300мс...");
+
+                // Даем 300 миллисекунд интерфейсу Ozon, чтобы обработать ввод и активировать кнопку
+                setTimeout(() => {
+                    const saveButton = document.querySelector('[data-testid="saveRelocateBtn"]');
+                    if (saveButton) {
+                        saveButton.click();
+                        console.log("[Relocator] Изменения успешно сохранены.");
+                    } else {
+                        console.error("[Relocator] Кнопка сохранения [data-testid='saveRelocateBtn'] не найдена.");
+                    }
+                    isWaitingForCell = false; // Выходим из режима ожидания
+                }, 300);
+                return;
+            }
+            return;
+        }
+
+        // Собираем символы в буфер ТОЛЬКО если мы не ждем ячейку.
+        // Когда мы ждем ячейку, мы позволяем символам свободно печататься в активное поле ввода Ozon.
+        if (!isWaitingForCell && e.key.length === 1) {
+            inputBuffer += e.key;
+        }
+    }, true);
+
+    // Нажатие кнопки "Изменить" и фокусировка на поле ввода
+    async function startRelocationProcess() {
+        console.log("[Relocator] Открытие меню...");
+
+        const firstLogItem = document.querySelector('[data-testid="logItem"]');
+        if (!firstLogItem) {
+            console.error("[Relocator] Товар в логе не найден.");
+            return;
+        }
+
+        const relocateBtn = firstLogItem.querySelector('[data-testid="relocateBtn"]');
+        if (!relocateBtn) {
+            console.error("[Relocator] Кнопка 'Изменить' не найдена.");
+            return;
+        }
+
+        relocateBtn.click();
+
+        try {
+            // Ждем появления поля ячейки и кликаем по нему, чтобы установить фокус ввода
+            const selectCellInput = await waitForElement('input[placeholder="Выберите ячейку"]');
+
+            // Клик открывает список и переводит фокус клавиатуры на этот инпут
+            selectCellInput.click();
+            selectCellInput.focus();
+
+            isWaitingForCell = true;
+            console.log("[Relocator] Фокус установлен на поле ввода. Ожидаю сканирования ячейки...");
+        } catch (err) {
+            console.error("[Relocator] Ошибка фокусировки:", err.message);
+        }
+    }
+})();
