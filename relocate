@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Ozon Relocate Automation (by desslow)
 // @namespace    http://tampermonkey.net/
-// @version      4.0
-// @description  Автоматизация смены ячейки через прямое сканирование в поле ввода
+// @version      5.0
+// @description  Быстрая смена ячейки через сканер.
 // @author       desslow
 // @match        https://*.ozon.ru/*
 // @grant        none
@@ -11,13 +11,19 @@
 (function() {
     'use strict';
 
-    const TRIGGER_CODE = '8888'; // Код QR-триггера для запуска процесса
+    // Коды QR-триггеров
+    const TRIGGERS = {
+        RELOCATE: '8888',     // Смена ячейки
+        TOGGLE_REC: '0000',   // Нажатие на тоггл "С рекомендацией"
+        OPEN_SEARCH: '1111',  // Открыть поиск в новой вкладке
+        CLOSE_SEARCH: '2222'  // Закрыть текущую вкладку
+    };
 
     let isWaitingForCell = false;
     let inputBuffer = '';
     let lastKeyTime = Date.now();
 
-    console.log(`[Relocator] Скрипт запущен в нативном режиме. Ожидание триггера "${TRIGGER_CODE}"...`);
+    console.log("[Relocator] Скрипт запущен v5.0. Ожидание триггеров сканера...");
 
     // Вспомогательная функция ожидания элементов
     function waitForElement(selector, timeout = 3000) {
@@ -36,9 +42,27 @@
         });
     }
 
-    // Слушатель клавиатуры
+    // Очистка поля ввода Ozon, чтобы система не реагировала на технические штрихкоды
+    function clearActiveInput() {
+        const activeEl = document.activeElement;
+        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+            try {
+                // Нативный вызов сеттера для обхода защиты React
+                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                nativeInputValueSetter.call(activeEl, "");
+                // Имитируем события ввода, чтобы React понял, что поле очищено
+                activeEl.dispatchEvent(new Event('input', { bubbles: true }));
+                activeEl.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch (err) {
+                activeEl.value = ''; // Резервный вариант
+            }
+        }
+    }
+
+    // Слушатель клавиатуры (перехват на стадии capture - true)
     window.addEventListener('keydown', function(e) {
         const currentTime = Date.now();
+        // Если пауза между символами больше 150мс, сбрасываем буфер (защита от ручного ввода)
         if (currentTime - lastKeyTime > 150) {
             inputBuffer = '';
         }
@@ -48,22 +72,28 @@
             const rawCode = inputBuffer.trim();
             inputBuffer = '';
 
-            // Если считан триггер запуска
-            if (rawCode === TRIGGER_CODE && !isWaitingForCell) {
+            // Если считан один из триггеров
+            if (Object.values(TRIGGERS).includes(rawCode) && !isWaitingForCell) {
                 e.preventDefault();
-                e.stopPropagation();
-                startRelocationProcess();
+                e.stopImmediatePropagation(); // Блокируем передачу Enter Озону
+
+                clearActiveInput(); // Стираем цифры триггера из строки поиска Озона
+
+                if (rawCode === TRIGGERS.RELOCATE) startRelocationProcess();
+                if (rawCode === TRIGGERS.TOGGLE_REC) toggleRecommendation();
+                if (rawCode === TRIGGERS.OPEN_SEARCH) openSearch();
+                if (rawCode === TRIGGERS.CLOSE_SEARCH) closeSearch();
                 return;
             }
 
             // Если мы ждали скан ячейки, и сканер прислал финальный Enter
             if (isWaitingForCell) {
                 e.preventDefault();
-                e.stopPropagation();
+                e.stopImmediatePropagation(); // Озон не должен обрабатывать этот Enter сам
 
                 console.log("[Relocator] Скан ячейки завершен. Сохраняем через 300мс...");
 
-                // Даем 300 миллисекунд интерфейсу Ozon, чтобы обработать ввод и активировать кнопку
+                // Даем 300 миллисекунд интерфейсу Ozon, чтобы обработать ввод ячейки
                 setTimeout(() => {
                     const saveButton = document.querySelector('[data-testid="saveRelocateBtn"]');
                     if (saveButton) {
@@ -79,43 +109,71 @@
             return;
         }
 
-        // Собираем символы в буфер ТОЛЬКО если мы не ждем ячейку.
-        // Когда мы ждем ячейку, мы позволяем символам свободно печататься в активное поле ввода Ozon.
+        // Собираем символы в буфер
         if (!isWaitingForCell && e.key.length === 1) {
             inputBuffer += e.key;
         }
     }, true);
 
-    // Нажатие кнопки "Изменить" и фокусировка на поле ввода
-    async function startRelocationProcess() {
-        console.log("[Relocator] Открытие меню...");
+    // --- ФУНКЦИИ ДЕЙСТВИЙ ---
 
-        const firstLogItem = document.querySelector('[data-testid="logItem"]');
-        if (!firstLogItem) {
-            console.error("[Relocator] Товар в логе не найден.");
-            return;
+    // 8888 - Смена ячейки
+    async function startRelocationProcess() {
+        console.log("[Relocator] Ищу товар в логах для смены ячейки...");
+
+        const logItems = document.querySelectorAll('[data-testid="logItem"]');
+        let relocateBtn = null;
+
+        // Перебираем логи и ищем ПЕРВЫЙ лог, в котором ЕСТЬ кнопка изменить.
+        // Это пропустит логи завершения перевозки и приема тарников.
+        for (let item of logItems) {
+            const btn = item.querySelector('[data-testid="relocateBtn"]');
+            if (btn) {
+                relocateBtn = btn;
+                break;
+            }
         }
 
-        const relocateBtn = firstLogItem.querySelector('[data-testid="relocateBtn"]');
         if (!relocateBtn) {
-            console.error("[Relocator] Кнопка 'Изменить' не найдена.");
+            console.error("[Relocator] Кнопка 'Изменить' не найдена (возможно нет подходящих товаров).");
             return;
         }
 
         relocateBtn.click();
 
         try {
-            // Ждем появления поля ячейки и кликаем по нему, чтобы установить фокус ввода
             const selectCellInput = await waitForElement('input[placeholder="Выберите ячейку"]');
-
-            // Клик открывает список и переводит фокус клавиатуры на этот инпут
             selectCellInput.click();
             selectCellInput.focus();
 
             isWaitingForCell = true;
-            console.log("[Relocator] Фокус установлен на поле ввода. Ожидаю сканирования ячейки...");
+            console.log("[Relocator] Фокус установлен. Ожидаю сканирования ячейки...");
         } catch (err) {
             console.error("[Relocator] Ошибка фокусировки:", err.message);
         }
     }
+
+    // 0000 - Тоггл рекомендации
+    function toggleRecommendation() {
+        const toggler = document.querySelector('[data-testid="recommendationToggler"]');
+        if (toggler) {
+            toggler.click();
+            console.log("[Relocator] Нажат тоггл 'С рекомендацией'.");
+        } else {
+            console.error("[Relocator] Тоггл 'С рекомендацией' на странице не найден.");
+        }
+    }
+
+    // 1111 - Открыть поиск
+    function openSearch() {
+        console.log("[Relocator] Открытие поиска в новой вкладке...");
+        window.open('https://turbo-pvz.ozon.ru/search', '_blank');
+    }
+
+    // 2222 - Закрыть вкладку
+    function closeSearch() {
+        console.log("[Relocator] Закрытие текущей вкладки...");
+        window.close();
+    }
+
 })();
