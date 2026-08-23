@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ozon Relocate Automation (by desslow)
 // @namespace    http://tampermonkey.net/
-// @version      5.0
+// @version      5.1
 // @description  Быстрая смена ячейки через сканер.
 // @author       desslow
 // @match        https://*.ozon.ru/*
@@ -155,14 +155,15 @@
 
     // 0000 - Тоггл рекомендации
     function toggleRecommendation() {
-        const toggler = document.querySelector('[data-testid="recommendationToggler"]');
-        if (toggler) {
-            toggler.click();
-            console.log("[Relocator] Нажат тоггл 'С рекомендацией'.");
-        } else {
-            console.error("[Relocator] Тоггл 'С рекомендацией' на странице не найден.");
-        }
+    // Ищем input внутри тоггла
+    const toggler = document.querySelector('[data-testid="recommendationToggler"] input[type="checkbox"]');
+    if (toggler) {
+        toggler.click();
+        console.log("[Relocator] Нажат тоггл 'С рекомендацией'.");
+    } else {
+        console.error("[Relocator] Тоггл 'С рекомендацией' на странице не найден.");
     }
+}
 
     // 1111 - Открыть поиск
     function openSearch() {
