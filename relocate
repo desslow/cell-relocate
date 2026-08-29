@@ -80,7 +80,7 @@
                 clearActiveInput(); // Стираем цифры триггера из строки поиска Озона
 
                 if (rawCode === TRIGGERS.RELOCATE) startRelocationProcess();
-                if (rawCode === TRIGGERS.TOGGLE_REC) togglemendation();
+                if (rawCode === TRIGGERS.TOGGLE_REC) toggleRecommendation();
                 if (rawCode === TRIGGERS.OPEN_SEARCH) openSearch();
                 if (rawCode === TRIGGERS.CLOSE_SEARCH) closeSearch();
                 return;
@@ -158,8 +158,7 @@
     // Ищем input внутри тоггла
     const toggler = document.querySelector('[data-testid="recommendationToggler"]');
     if (toggler) {
-        toggler.click
-();
+        toggler.click();
         console.log("[Relocator] Нажат тоггл 'С рекомендацией'.");
     } else {
         console.error("[Relocator] Тоггл 'С рекомендацией' на странице не найден.");
