@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Ozon Relocate Automation (FIXED ENTER & TIMEOUT)
+// @name         OZON KEYBOARD TEST
 // @namespace    http://tampermonkey.net/
-// @version      5.3-FIX
-// @description  Исправлена обработка Enter и таймаутов для проблемных ноутбуков
+// @version      1.0
+// @description  ТЕСТ: Ловит ВСЕ клавиши
 // @author       desslow
 // @match        https://*.ozon.ru/*
 // @grant        none
@@ -10,164 +10,47 @@
 
 (function() {
     'use strict';
-
-    const TRIGGERS = {
-        RELOCATE: '8888',
-        TOGGLE_REC: '0000',
-        OPEN_SEARCH: '1111',
-        CLOSE_SEARCH: '2222'
-    };
-
-    let isWaitingForCell = false;
-    let inputBuffer = '';
-    let lastKeyTime = Date.now();
     
-    // Таймаут увеличен до 1000мс (1 секунда). Этого достаточно для любого сканера, 
-    // но сбросит буфер, если вы начали печатать руками и замедлились.
-    const KEY_TIMEOUT = 1000; 
+    console.log("✅ СКРИПТ ЗАПУЩЕН. Жду ЛЮБЫХ клавиш...");
+    
+    // Создаем визуальный индикатор на странице
+    const indicator = document.createElement('div');
+    indicator.style.cssText = `
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        background: #ff0000;
+        color: white;
+        padding: 20px;
+        font-size: 18px;
+        z-index: 999999;
+        border-radius: 5px;
+        box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    `;
+    indicator.innerHTML = '🔴 ЖДУ КЛАВИШИ...<br><small>Сканируй QR или нажимай кнопки</small>';
+    document.body.appendChild(indicator);
 
-    console.log("[Relocator] v5.3-FIX запущен. Таймаут:", KEY_TIMEOUT, "мс");
-
-    function waitForElement(selector, timeout = 3000) {
-        return new Promise((resolve, reject) => {
-            const startTime = Date.now();
-            const interval = setInterval(() => {
-                const el = document.querySelector(selector);
-                if (el) {
-                    clearInterval(interval);
-                    resolve(el);
-                } else if (Date.now() - startTime > timeout) {
-                    clearInterval(interval);
-                    reject(new Error(`Элемент ${selector} не найден.`));
-                }
-            }, 100);
-        });
-    }
-
-    function clearActiveInput() {
-        const activeEl = document.activeElement;
-        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
-            try {
-                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                nativeInputValueSetter.call(activeEl, "");
-                activeEl.dispatchEvent(new Event('input', { bubbles: true }));
-                activeEl.dispatchEvent(new Event('change', { bubbles: true }));
-            } catch (err) {
-                activeEl.value = '';
-            }
-        }
-    }
-
-    // ДОБАВЛЕНО: Очистка буфера при клике мышкой, чтобы ручной ввод не конфликтовал со сканером
-    window.addEventListener('click', () => {
-        inputBuffer = '';
-        lastKeyTime = Date.now();
-    }, true);
-
+    // Ловим ВСЕ keydown (без фильтров)
     window.addEventListener('keydown', function(e) {
-        const currentTime = Date.now();
-        const timeDiff = currentTime - lastKeyTime;
-        lastKeyTime = currentTime;
-
-        if (timeDiff > KEY_TIMEOUT) {
-            if (inputBuffer.length > 0) {
-                console.warn(`[Relocator] Буфер сброшен (пауза ${timeDiff}мс). Было: "${inputBuffer}"`);
-            }
-            inputBuffer = '';
-        }
-
-        // РАСШИРЕННОЕ УСЛОВИЕ ДЛЯ ENTER:
-        // Ловим обычный Enter, NumpadEnter и старый добрый keyCode 13
-        const isEnter = (e.key === 'Enter' || e.key === 'NumpadEnter' || e.code === 'Enter' || e.code === 'NumpadEnter' || e.keyCode === 13);
-
-        if (isEnter) {
-            const rawCode = inputBuffer.trim();
-            console.log(`[Relocator] Обнаружен Enter. Буфер: "${rawCode}" (длина: ${rawCode.length})`);
-            inputBuffer = ''; 
-
-            if (Object.values(TRIGGERS).includes(rawCode) && !isWaitingForCell) {
-                e.preventDefault();
-                e.stopImmediatePropagation();
-                console.log(`[Relocator] ✅ ТРИГГЕР СРАБОТАЛ: ${rawCode}`);
-
-                clearActiveInput();
-
-                if (rawCode === TRIGGERS.RELOCATE) startRelocationProcess();
-                if (rawCode === TRIGGERS.TOGGLE_REC) toggleRecommendation();
-                if (rawCode === TRIGGERS.OPEN_SEARCH) openSearch();
-                if (rawCode === TRIGGERS.CLOSE_SEARCH) closeSearch();
-                return;
-            }
-
-            if (isWaitingForCell) {
-                e.preventDefault();
-                e.stopImmediatePropagation();
-                console.log("[Relocator] Скан ячейки завершен. Сохраняем...");
-
-                setTimeout(() => {
-                    const saveButton = document.querySelector('[data-testid="saveRelocateBtn"]');
-                    if (saveButton) {
-                        saveButton.click();
-                        console.log("[Relocator] ✅ Сохранено.");
-                    } else {
-                        console.error("[Relocator] ❌ Кнопка сохранения не найдена.");
-                    }
-                    isWaitingForCell = false;
-                }, 300);
-                return;
-            }
-            return;
-        }
-
-        if (!isWaitingForCell && e.key.length === 1) {
-            inputBuffer += e.key;
-        }
+        console.log("🔥 КЛАВИША:", e.key, "| Code:", e.code, "| KeyCode:", e.keyCode);
+        
+        // Меняем индикатор
+        indicator.style.background = '#00ff00';
+        indicator.innerHTML = `✅ КЛАВИША: <b>${e.key}</b><br>Code: ${e.code}`;
+        
+        // Возвращаем красный через 2 секунды
+        setTimeout(() => {
+            indicator.style.background = '#ff0000';
+            indicator.innerHTML = '🔴 ЖДУ КЛАВИШИ...<br><small>Сканируй QR или нажимай кнопки</small>';
+        }, 2000);
     }, true);
 
-    async function startRelocationProcess() {
-        console.log("[Relocator] Ищу товар в логах...");
-        const logItems = document.querySelectorAll('[data-testid="logItem"]');
-        let relocateBtn = null;
-        for (let item of logItems) {
-            const btn = item.querySelector('[data-testid="relocateBtn"]');
-            if (btn) {
-                relocateBtn = btn;
-                break;
-            }
-        }
+    // Также ловим keyup и keypress для полноты картины
+    window.addEventListener('keyup', function(e) {
+        console.log("🔼 KEYUP:", e.key);
+    }, true);
 
-        if (!relocateBtn) {
-            console.error("[Relocator] Кнопка 'Изменить' не найдена.");
-            return;
-        }
-        relocateBtn.click();
-
-        try {
-            const selectCellInput = await waitForElement('input[placeholder="Выберите ячейку"]');
-            selectCellInput.click();
-            selectCellInput.focus();
-            isWaitingForCell = true;
-            console.log("[Relocator] Ожидаю сканирования ячейки...");
-        } catch (err) {
-            console.error("[Relocator] Ошибка фокусировки:", err.message);
-        }
-    }
-
-    function toggleRecommendation() {
-        const toggler = document.querySelector('[data-testid="recommendationToggler"]');
-        if (toggler) {
-            toggler.click();
-            console.log("[Relocator] Тоггл нажат.");
-        } else {
-            console.error("[Relocator] Тоггл не найден.");
-        }
-    }
-
-    function openSearch() {
-        window.open('https://turbo-pvz.ozon.ru/search', '_blank');
-    }
-
-    function closeSearch() {
-        window.close();
-    }
+    window.addEventListener('keypress', function(e) {
+        console.log("⌨️ KEYPRESS:", e.key);
+    }, true);
 })();
