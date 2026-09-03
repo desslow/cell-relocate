@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Ozon Relocate Automation (DEBUG MODE)
+// @name         Ozon Relocate Automation (FIXED ENTER & TIMEOUT)
 // @namespace    http://tampermonkey.net/
-// @version      5.2-DEBUG
-// @description  Быстрая смена ячейки через сканер (с расширенным логом)
+// @version      5.3-FIX
+// @description  Исправлена обработка Enter и таймаутов для проблемных ноутбуков
 // @author       desslow
 // @match        https://*.ozon.ru/*
 // @grant        none
@@ -22,10 +22,11 @@
     let inputBuffer = '';
     let lastKeyTime = Date.now();
     
-    // УВЕЛИЧЕННЫЙ таймаут. Сканеры на разных USB-портах могут "печатать" медленнее.
-    const KEY_TIMEOUT = 400; 
+    // Таймаут увеличен до 1000мс (1 секунда). Этого достаточно для любого сканера, 
+    // но сбросит буфер, если вы начали печатать руками и замедлились.
+    const KEY_TIMEOUT = 1000; 
 
-    console.log("[Relocator] DEBUG v5.2 запущен. Таймаут буфера:", KEY_TIMEOUT, "мс");
+    console.log("[Relocator] v5.3-FIX запущен. Таймаут:", KEY_TIMEOUT, "мс");
 
     function waitForElement(selector, timeout = 3000) {
         return new Promise((resolve, reject) => {
@@ -57,31 +58,37 @@
         }
     }
 
+    // ДОБАВЛЕНО: Очистка буфера при клике мышкой, чтобы ручной ввод не конфликтовал со сканером
+    window.addEventListener('click', () => {
+        inputBuffer = '';
+        lastKeyTime = Date.now();
+    }, true);
+
     window.addEventListener('keydown', function(e) {
         const currentTime = Date.now();
         const timeDiff = currentTime - lastKeyTime;
         lastKeyTime = currentTime;
 
-        // --- ОТЛАДОЧНЫЙ ЛОГ (СМОТРИТЕ В КОНСОЛЬ F12) ---
-        // console.log(`[DEBUG] Key: "${e.key}", Code: "${e.code}", Diff: ${timeDiff}ms, Buffer: "${inputBuffer}"`);
-
         if (timeDiff > KEY_TIMEOUT) {
             if (inputBuffer.length > 0) {
-                console.warn(`[Relocator] Буфер сброшен из-за таймаута (${timeDiff}мс). Было: "${inputBuffer}"`);
+                console.warn(`[Relocator] Буфер сброшен (пауза ${timeDiff}мс). Было: "${inputBuffer}"`);
             }
             inputBuffer = '';
         }
 
-        // Ловим Enter (проверяем и key, и code для надежности на разных раскладках)
-        if (e.key === 'Enter' || e.code === 'Enter' || e.keyCode === 13) {
+        // РАСШИРЕННОЕ УСЛОВИЕ ДЛЯ ENTER:
+        // Ловим обычный Enter, NumpadEnter и старый добрый keyCode 13
+        const isEnter = (e.key === 'Enter' || e.key === 'NumpadEnter' || e.code === 'Enter' || e.code === 'NumpadEnter' || e.keyCode === 13);
+
+        if (isEnter) {
             const rawCode = inputBuffer.trim();
-            console.log(`[Relocator] Нажат Enter. Итоговый буфер: "${rawCode}"`);
-            inputBuffer = ''; // Очищаем сразу после Enter
+            console.log(`[Relocator] Обнаружен Enter. Буфер: "${rawCode}" (длина: ${rawCode.length})`);
+            inputBuffer = ''; 
 
             if (Object.values(TRIGGERS).includes(rawCode) && !isWaitingForCell) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
-                console.log(`[Relocator] СРАБОТАЛ ТРИГГЕР: ${rawCode}`);
+                console.log(`[Relocator] ✅ ТРИГГЕР СРАБОТАЛ: ${rawCode}`);
 
                 clearActiveInput();
 
@@ -95,15 +102,15 @@
             if (isWaitingForCell) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
-                console.log("[Relocator] Скан ячейки завершен. Сохраняем через 300мс...");
+                console.log("[Relocator] Скан ячейки завершен. Сохраняем...");
 
                 setTimeout(() => {
                     const saveButton = document.querySelector('[data-testid="saveRelocateBtn"]');
                     if (saveButton) {
                         saveButton.click();
-                        console.log("[Relocator] Изменения успешно сохранены.");
+                        console.log("[Relocator] ✅ Сохранено.");
                     } else {
-                        console.error("[Relocator] Кнопка сохранения не найдена.");
+                        console.error("[Relocator] ❌ Кнопка сохранения не найдена.");
                     }
                     isWaitingForCell = false;
                 }, 300);
@@ -112,14 +119,13 @@
             return;
         }
 
-        // Собираем только односимвольные ключи (игнорируем Shift, Ctrl, Alt и т.д.)
         if (!isWaitingForCell && e.key.length === 1) {
             inputBuffer += e.key;
         }
     }, true);
 
     async function startRelocationProcess() {
-        console.log("[Relocator] Ищу товар в логах для смены ячейки...");
+        console.log("[Relocator] Ищу товар в логах...");
         const logItems = document.querySelectorAll('[data-testid="logItem"]');
         let relocateBtn = null;
         for (let item of logItems) {
@@ -141,7 +147,7 @@
             selectCellInput.click();
             selectCellInput.focus();
             isWaitingForCell = true;
-            console.log("[Relocator] Фокус установлен. Ожидаю сканирования ячейки...");
+            console.log("[Relocator] Ожидаю сканирования ячейки...");
         } catch (err) {
             console.error("[Relocator] Ошибка фокусировки:", err.message);
         }
@@ -151,19 +157,17 @@
         const toggler = document.querySelector('[data-testid="recommendationToggler"]');
         if (toggler) {
             toggler.click();
-            console.log("[Relocator] Нажат тоггл 'С рекомендацией'.");
+            console.log("[Relocator] Тоггл нажат.");
         } else {
             console.error("[Relocator] Тоггл не найден.");
         }
     }
 
     function openSearch() {
-        console.log("[Relocator] Открытие поиска...");
         window.open('https://turbo-pvz.ozon.ru/search', '_blank');
     }
 
     function closeSearch() {
-        console.log("[Relocator] Закрытие вкладки...");
         window.close();
     }
 })();
