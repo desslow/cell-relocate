@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Ozon Relocate Automation
 // @namespace    http://tampermonkey.net/
-// @version      5.7
-// @description  Быстрая смена ячейки через сканер
+// @version      5.8
+// @description  Быстрая смена ячейки, TTS КГТ
 // @author       desslow
 // @match        https://*.ozon.ru/*
 // @run-at       document-start
@@ -211,7 +211,7 @@
                 return;
             }
 
-            // === АВТО-НАЖАТИЕ КНОПКИ ПОСЛЕ СКАНИРОВАНИЯ ЯЧЕЙКИ ===
+            // === АВТО-НАЖАТИЕ КНОПКИ ПОДТВЕРЖДЕНИЯ ПОСЛЕ СКАНИРОВАНИЯ ЯЧЕЙКИ ===
             if (isWaitingForCell) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
@@ -220,7 +220,7 @@
                     // 1. Ищем по актуальному data-testid кнопки внутри модалки
                     let confirmBtn = document.querySelector('[data-testid="locateButton"]');
                     
-                    // 2. Фолбэк: ищем кнопку "Изменить" или "Сохранить" внутри открытой модалки (drawer)
+                    // 2. Фолбэк: ищем кнопку "Изменить" или "Сохранить" внутри открытой модалки
                     if (!confirmBtn) {
                         const modal = document.querySelector('.ozi__drawer__drawer__p1tr_, ._drawer_x5qa8_1');
                         if (modal) {
@@ -257,9 +257,10 @@
             return;
         }
 
-        // === УМНЫЙ ПОИСК: Ищем последний УСПЕШНО принятый товар, игнорируя ошибки ===
+        // === ИСПРАВЛЕНО: Ищем ПЕРВЫЙ (самый свежий) элемент, так как новые добавляются в начало DOM ===
+        // === ИСПРАВЛЕНО: Проверяем только наличие logItemArticle, игнорируя статус (success/warning/error) ===
         let targetItem = null;
-        for (let i = logItems.length - 1; i >= 0; i--) {
+        for (let i = 0; i < logItems.length; i++) {
             if (logItems[i].querySelector('[data-testid="logItemArticle"]')) {
                 targetItem = logItems[i];
                 break;
@@ -267,26 +268,26 @@
         }
 
         if (!targetItem) {
-            console.warn('Ozon Relocate: Успешные записи в логе не найдены.');
+            console.warn('Ozon Relocate: Записи о товарах (logItemArticle) не найдены в логе.');
             return;
         }
 
-        // 1. Ищем кнопку открытия модалки перемещения по новому актуальному селектору
+        // Ищем нативную кнопку открытия модалки перемещения
         let openDrawerBtn = targetItem.querySelector('[data-testid="openLocateDrawerButton"]');
 
-        // 2. Фолбэк: ищем любую кнопку с текстом "Изменить" внутри этого элемента
+        // Фолбэк: если data-testid снова изменят, ищем по точному тексту
         if (!openDrawerBtn) {
             const buttons = targetItem.querySelectorAll('button');
             openDrawerBtn = Array.from(buttons).find(btn => btn.textContent.trim() === 'Изменить');
         }
 
         if (openDrawerBtn) {
-            console.log('Ozon Relocate: Нажимаем кнопку открытия перемещения...');
-            openDrawerBtn.click();
+            console.log('Ozon Relocate: Нажимаем нативную кнопку "Изменить" у последнего товара...');
+            openDrawerBtn.click(); // Нативный клик гарантирует корректное открытие окна без побочных API-триггеров
 
-            // Ждем открытия модалки и фокусируем инпут для сканера
+            // Ждем появления инпута в открывшейся модалке
             try {
-                const cellInput = await waitForElement('input[placeholder*="ячейку"], input[placeholder*="Ячейку"], .ozi__drawer__drawer__p1tr_ input', 3000);
+                const cellInput = await waitForElement('input[placeholder*="ячейку"], input[placeholder*="Ячейку"], .ozi__drawer__drawer__p1tr_ input, ._drawer_x5qa8_1 input', 3000);
                 cellInput.click();
                 cellInput.focus();
                 isWaitingForCell = true;
@@ -295,7 +296,7 @@
                 console.warn('Ozon Relocate: Инпут ячейки в модалке не найден.');
             }
         } else {
-            console.error('Ozon Relocate: Кнопка "Изменить" для перемещения не найдена в последнем успешном элементе.');
+            console.error('Ozon Relocate: Кнопка "Изменить" не найдена в последнем элементе товара.');
         }
     }
 
