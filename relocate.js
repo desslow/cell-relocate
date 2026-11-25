@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ozon Relocate Automation
 // @namespace    http://tampermonkey.net/
-// @version      5.6
+// @version      5.7
 // @description  Быстрая смена ячейки через сканер
 // @author       desslow
 // @match        https://*.ozon.ru/*
@@ -211,34 +211,35 @@
                 return;
             }
 
-            // === ИСПРАВЛЕНИЕ: АВТО-НАЖАТИЕ КНОПКИ "ИЗМЕНИТЬ" ПОСЛЕ СКАНИРОВАНИЯ ЯЧЕЙКИ ===
+            // === АВТО-НАЖАТИЕ КНОПКИ ПОСЛЕ СКАНИРОВАНИЯ ЯЧЕЙКИ ===
             if (isWaitingForCell) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
 
                 setTimeout(() => {
-                    // 1. Ищем по новому актуальному data-testid
-                    let actionButton = document.querySelector('[data-testid="locateButton"]');
+                    // 1. Ищем по актуальному data-testid кнопки внутри модалки
+                    let confirmBtn = document.querySelector('[data-testid="locateButton"]');
                     
-                    // 2. Фолбэк на старый data-testid (на случай разных версий UI)
-                    if (!actionButton) {
-                        actionButton = document.querySelector('[data-testid="saveRelocateBtn"]');
-                    }
-                    
-                    // 3. Фолбэк на поиск кнопки по точному тексту "Изменить"
-                    if (!actionButton) {
-                        actionButton = Array.from(document.querySelectorAll('button')).find(btn => btn.textContent.trim() === 'Изменить');
+                    // 2. Фолбэк: ищем кнопку "Изменить" или "Сохранить" внутри открытой модалки (drawer)
+                    if (!confirmBtn) {
+                        const modal = document.querySelector('.ozi__drawer__drawer__p1tr_, ._drawer_x5qa8_1');
+                        if (modal) {
+                            const buttons = modal.querySelectorAll('button');
+                            confirmBtn = Array.from(buttons).find(btn => 
+                                btn.textContent.trim() === 'Изменить' || btn.textContent.trim() === 'Сохранить'
+                            );
+                        }
                     }
 
-                    if (actionButton) {
-                        actionButton.click();
-                        console.log('Ozon Relocate: Кнопка "Изменить" нажата автоматически.');
+                    if (confirmBtn) {
+                        confirmBtn.click();
+                        console.log('Ozon Relocate: Кнопка подтверждения перемещения нажата.');
                     } else {
-                        console.warn('Ozon Relocate: Кнопка "Изменить" не найдена в DOM.');
+                        console.warn('Ozon Relocate: Кнопка подтверждения не найдена в модалке.');
                     }
                     
                     isWaitingForCell = false;
-                }, 300); // Небольшая задержка, чтобы UI успел обработать ввод сканера
+                }, 300);
                 return;
             }
             return;
@@ -256,64 +257,45 @@
             return;
         }
 
-        const lastItem = logItems[logItems.length - 1];
-        let barcode = lastItem.getAttribute('data-barcode') ||
-                      lastItem.getAttribute('data-article') ||
-                      lastItem.querySelector('[data-testid="barcode"]')?.textContent?.trim() ||
-                      lastItem.querySelector('[data-testid="article"]')?.textContent?.trim();
-
-        if (!barcode) {
-            const textContent = lastItem.textContent || '';
-            const match = textContent.match(/\b[a-zA-Z0-9]{6,}\b/g);
-            if (match) {
-                barcode = match.find(b => !/кгт|ячейка|товар|ozon|переместить/i.test(b));
+        // === УМНЫЙ ПОИСК: Ищем последний УСПЕШНО принятый товар, игнорируя ошибки ===
+        let targetItem = null;
+        for (let i = logItems.length - 1; i >= 0; i--) {
+            if (logItems[i].querySelector('[data-testid="logItemArticle"]')) {
+                targetItem = logItems[i];
+                break;
             }
         }
 
-        if (barcode) {
-            console.log('Ozon Relocate: Найден штрихкод для перемещения:', barcode);
-            try {
-                const response = await fetch('https://turbo-pvz.ozon.ru/api2/inbound/articles/resolve-v3', {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        barcode: barcode,
-                        isArticlePositionRecommendationEnabled: true
-                    })
-                });
-
-                if (response.ok) {
-                    console.log('Ozon Relocate: Успешное перемещение через API (модалка может не открыться, так как бэкенд уже всё сделал).');
-                    return; 
-                } else {
-                    console.error('Ozon Relocate: Ошибка API resolve-v3, статус:', response.status);
-                }
-            } catch (e) {
-                console.error('Ozon Relocate: Исключение при вызове API:', e);
-            }
+        if (!targetItem) {
+            console.warn('Ozon Relocate: Успешные записи в логе не найдены.');
+            return;
         }
 
-        // Fallback на UI, если API не сработал или штрихкод не найден
-        console.log('Ozon Relocate: Попытка найти кнопку перемещения через UI...');
-        let relocateBtn = lastItem.querySelector('[data-testid="relocateBtn"]') || lastItem.querySelector('button');
-        
-        if (relocateBtn) {
-            relocateBtn.click();
+        // 1. Ищем кнопку открытия модалки перемещения по новому актуальному селектору
+        let openDrawerBtn = targetItem.querySelector('[data-testid="openLocateDrawerButton"]');
+
+        // 2. Фолбэк: ищем любую кнопку с текстом "Изменить" внутри этого элемента
+        if (!openDrawerBtn) {
+            const buttons = targetItem.querySelectorAll('button');
+            openDrawerBtn = Array.from(buttons).find(btn => btn.textContent.trim() === 'Изменить');
+        }
+
+        if (openDrawerBtn) {
+            console.log('Ozon Relocate: Нажимаем кнопку открытия перемещения...');
+            openDrawerBtn.click();
+
+            // Ждем открытия модалки и фокусируем инпут для сканера
             try {
-                const selectCellInput = await waitForElement('input[placeholder*="ячейку"], input[placeholder*="Ячейку"]', 3000);
-                selectCellInput.click();
-                selectCellInput.focus();
-                isWaitingForCell = true; // Активируем режим ожидания сканирования ячейки
-                console.log('Ozon Relocate: Режим ожидания сканирования ячейки активирован.');
+                const cellInput = await waitForElement('input[placeholder*="ячейку"], input[placeholder*="Ячейку"], .ozi__drawer__drawer__p1tr_ input', 3000);
+                cellInput.click();
+                cellInput.focus();
+                isWaitingForCell = true;
+                console.log('Ozon Relocate: Ожидание сканирования новой ячейки...');
             } catch (err) {
-                console.warn('Ozon Relocate: Инпут ячейки не найден.');
+                console.warn('Ozon Relocate: Инпут ячейки в модалке не найден.');
             }
         } else {
-            console.error('Ozon Relocate: Не удалось найти кнопку перемещения или штрихкод.');
+            console.error('Ozon Relocate: Кнопка "Изменить" для перемещения не найдена в последнем успешном элементе.');
         }
     }
 
